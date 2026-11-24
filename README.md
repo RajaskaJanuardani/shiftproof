@@ -27,7 +27,9 @@ Open the URL printed by Vite. Without Firebase configuration, the app opens in e
 Load the example. With Firebase configured, use **Switch to live** to run the same input through the SDK.
 
 - Click **Extract on device** and wait for the on-device source label. Verify the facts against the private note and remove any identifying or access details.
+- Use **View source** to highlight the verbatim excerpt in the private note. A missing or ambiguous match is marked **Source unverified**. Edited values are marked **Edited manually** until restored to the extracted value.
 - Review the four fields, check the consent box, then click **Generate brief**. Verify the reported inference source and compare the brief against the reviewed fields. Changing a field resets consent.
+- Paste `Lockbox code 4812` into a shareable field to verify the local privacy check blocks cloud generation. Remove the text and review the fields again. The check catches common formats for phone numbers, emails and access codes. Review is still needed for private details outside those patterns.
 - Once Chrome has finished downloading Gemini Nano and the production service worker controls the page, disconnect the network. Run extraction again with the app open. Use **Format locally** to create a brief immediately from the reviewed fields and download it.
 - If the device model is unavailable, the app reports the failure and supports manual entry. Once the user reviews and authorizes the facts, the brief can use the cloud model even on browsers without Gemini Nano.
 
@@ -39,7 +41,7 @@ Load the example. With Firebase configured, use **Switch to live** to run the sa
 | Generate brief | Four explicitly reviewed fields | `PREFER_IN_CLOUD` |
 | Format locally | No SDK request | Plain-text template |
 
-The extraction checks that Firebase reports `ON_DEVICE`. The brief displays the source reported by the SDK. The review stage is necessary because model filtering can miss sensitive details. Shiftproof holds the original note in page memory. Reloading the page clears it. Copy and download are user-initiated exports of the resulting brief.
+The extraction checks that Firebase reports `ON_DEVICE`. The brief displays the source reported by the SDK. Exact quote matching confirms that a unique excerpt exists. The technician still decides whether it supports the extracted value. Shiftproof holds the original note and evidence ranges in page memory. Reloading the page clears them. Copy and download are user-initiated exports of the resulting brief.
 
 ## Work during #BuildHybridAI 2026
 

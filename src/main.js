@@ -3,7 +3,8 @@ import '@fontsource/ibm-plex-mono/latin-400.css';
 import '@phosphor-icons/web/regular';
 import './style.css';
 import { extractOnDevice, generateBrief, liveConfigured } from './ai.js';
-import { exampleNote, exampleFacts, labels } from './sample.js';
+import { exampleNote, exampleFacts } from './sample.js';
+import { attachEvidence, fieldIds, findCloudPrivacyFlags, labels } from './facts.js';
 
 const icon = (name) => '<i class="ph ph-' + name + '" aria-hidden="true"></i>';
 const app = document.querySelector('#app');
@@ -42,8 +43,13 @@ app.innerHTML = `
     <section class="panel review" aria-labelledby="review-heading">
       <div class="panel-head"><div class="heading-icon">${icon('list-checks')}</div><div><h3 id="review-heading">Review shareable facts</h3><p>Check details and remove sensitive information</p></div></div>
       <div class="review-body">
-        <div class="fields">${Object.entries(labels).map(([id, [label, placeholder]]) => `<div><label for="${id}">${label}</label><textarea id="${id}" rows="1" maxlength="450" placeholder="${placeholder}"></textarea></div>`).join('')}</div>
+        <div class="fields">${Object.entries(labels).map(([id, [label, placeholder]]) => `
+          <div>
+            <div class="field-heading"><label for="${id}">${label}</label><span id="${id}-status" class="field-status" hidden></span><button class="source-link" type="button" id="${id}-source" aria-label="Show source for ${label}" hidden>${icon('quotes')} View source</button></div>
+            <textarea id="${id}" rows="1" maxlength="450" placeholder="${placeholder}"></textarea>
+          </div>`).join('')}</div>
         <label class="consent"><input type="checkbox" id="consent"><span id="consent-copy"></span></label>
+        <p class="privacy-warning" id="privacy-warning" role="status" hidden></p>
         <div class="review-actions"><button class="primary" id="generate">${icon('sparkle')} Generate brief</button><button class="ghost" id="format">${icon('file-text')} Format locally</button></div>
         <p class="assist" id="review-status" role="status"></p>
       </div>
@@ -60,18 +66,19 @@ app.innerHTML = `
 const el = (id) => document.getElementById(id);
 const note = el('note');
 const consent = el('consent');
-const fieldIds = Object.keys(labels);
 let busy = false;
 let sample = false;
 let extractionSource = '';
+let evidence = {};
 let brief = '';
 
 function facts() {
   return Object.fromEntries(fieldIds.map((field) => [field, el(field).value.trim()]));
 }
 
-function setFacts(values = {}) {
-  for (const field of fieldIds) el(field).value = values[field] ?? '';
+function setFacts(draft = {}) {
+  evidence = draft;
+  for (const field of fieldIds) el(field).value = draft[field]?.value ?? '';
   consent.checked = false;
   clearOutput();
 }
@@ -83,7 +90,14 @@ function clearOutput() {
 }
 
 function render() {
-  const hasFacts = Object.values(facts()).some(Boolean);
+  const values = facts();
+  const hasFacts = Object.values(values).some(Boolean);
+  const flags = findCloudPrivacyFlags(values);
+  el('privacy-warning').hidden = !flags.length;
+  el('privacy-warning').textContent = flags.length
+    ? 'Remove possible private details before generating: ' +
+      flags.map(({ field, type }) => labels[field][0] + ' (' + type + ')').join(', ') + '.'
+    : '';
   el('network').innerHTML = navigator.onLine ? icon('wifi-high') + ' Online' : icon('wifi-slash') + ' Offline';
   el('mode').innerHTML = sample ? icon('flask') + ' Example mode' : liveConfigured ? icon('cpu') + ' Live inference' : icon('gear-six') + ' Firebase setup needed';
   el('consent-copy').textContent = sample
@@ -91,15 +105,27 @@ function render() {
     : 'I reviewed these fields and allow them to be sent to Gemini in the cloud.';
   el('count').textContent = note.value.length + ' / 3,000';
   el('extract').disabled = busy || !note.value.trim() || (!sample && !liveConfigured);
-  el('generate').disabled = busy || !hasFacts || !consent.checked || (!sample && !liveConfigured);
+  el('generate').disabled = busy || !hasFacts || !consent.checked || flags.length > 0 || (!sample && !liveConfigured);
   el('format').disabled = busy || !hasFacts;
-  el('consent').disabled = busy || !hasFacts;
+  el('consent').disabled = busy || !hasFacts || flags.length > 0;
   el('sample').disabled = busy;
   el('clear').disabled = busy;
   el('live').hidden = !sample || !liveConfigured;
   el('live').disabled = busy;
   note.readOnly = busy;
-  for (const field of fieldIds) el(field).readOnly = busy;
+  for (const field of fieldIds) {
+    const input = el(field);
+    const status = el(field + '-status');
+    const link = el(field + '-source');
+    const original = evidence[field];
+    const unchanged = original?.value === input.value.trim();
+    const hasSource = Boolean(unchanged && original.range);
+    input.readOnly = busy;
+    link.hidden = !hasSource;
+    link.disabled = busy;
+    status.hidden = hasSource || !input.value.trim();
+    status.textContent = unchanged ? 'Source unverified' : original?.value ? 'Edited manually' : 'Entered manually';
+  }
 }
 
 function reset(useSample) {
@@ -154,12 +180,19 @@ note.addEventListener('input', () => {
   render();
 });
 
-for (const field of fieldIds) el(field).addEventListener('input', () => {
-  consent.checked = false;
-  clearOutput();
-  el('review-status').textContent = '';
-  render();
-});
+for (const field of fieldIds) {
+  el(field).addEventListener('input', () => {
+    consent.checked = false;
+    clearOutput();
+    el('review-status').textContent = '';
+    render();
+  });
+  el(field + '-source').onclick = () => {
+    const [start, end] = evidence[field].range;
+    note.focus();
+    note.setSelectionRange(start, end);
+  };
+}
 consent.addEventListener('change', render);
 
 el('extract').onclick = () => run('extract-status', async () => {
@@ -167,7 +200,7 @@ el('extract').onclick = () => run('extract-status', async () => {
   const extracted = sample ? exampleFacts : await extractOnDevice(note.value, (fraction) => {
     el('extract-status').textContent = 'Downloading Gemini Nano · ' + Math.round(fraction * 100) + '%';
   });
-  setFacts(extracted);
+  setFacts(attachEvidence(note.value, extracted));
   extractionSource = sample ? 'Saved example' : 'Gemini Nano · On-device verified';
   el('extract-status').textContent = extractionSource;
   el('review-status').textContent = '';
@@ -176,6 +209,7 @@ el('extract').onclick = () => run('extract-status', async () => {
 el('generate').onclick = () => run('review-status', async () => {
   clearOutput();
   const reviewed = facts();
+  if (!consent.checked || findCloudPrivacyFlags(reviewed).length) throw new Error('Review the fields and remove any flagged details first.');
   el('review-status').textContent = sample ? 'Loading example preview…' : 'Generating from reviewed fields…';
   const result = sample
     ? { text: template(reviewed), source: 'Example preview · No cloud request made' }
